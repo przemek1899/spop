@@ -1,5 +1,6 @@
 import Data.Char
 import System.IO
+import System.IO.Error
 import Parser
 
 take2Dim :: (Int, Int) -> [[a]] -> [[a]] 
@@ -45,6 +46,13 @@ def_pools = 8
 
 wolfMoves = ['q', 'w', 'a', 'd']
 
+drawOptions :: IO ()
+drawOptions = do putStrLn "ruchy wilka: q - góra-lewo, w - góra-prawo, a - dół-lewo, w - dół prawo"
+		 putStrLn "n - nowa gra"
+		 putStrLn "k - koniec gry"
+		 putStrLn "z - zapis stanu gry do pliku"
+		 putStrLn "r - wczytanie stanu gry z pliku"
+
 drawCheckboard' :: [[String]] -> IO ()
 drawCheckboard' [] = return ()
 drawCheckboard' [[]] = return ()
@@ -71,10 +79,13 @@ drawFigure "w" row = drawWolf row
 drawFigure ['o', _] row = drawSheep row
 drawFigure _ _ = spottedTab columns ' '
 
+wolfSign :: Char
+wolfSign = '*'
+
 drawWolf :: Int -> String
 -- dla rows = 5 i columns = 10, ogolnie columns = 2*rows
-drawWolf row | row <= (rows `div` 2) = spottedTab (2*(row-1)) ' ' ++ spottedTab 2 sign ++ spottedTab (columns - 4*row) ' '  ++ spottedTab 2 sign ++ spottedTab (2*(row-1)) ' '
-             | row == (rows `div` 2 + (rows `mod` 2)) = spottedTab (half - 1) ' ' ++ spottedTab 2 sign ++ spottedTab (half - 1) ' '
+drawWolf row | row <= (rows `div` 2) = spottedTab (2*(row-1)) ' ' ++ spottedTab 2 wolfSign ++ spottedTab (columns - 4*row) ' '  ++ spottedTab 2 wolfSign ++ spottedTab (2*(row-1)) ' '
+             | row == (rows `div` 2 + (rows `mod` 2)) = spottedTab (half - 1) ' ' ++ spottedTab 2 wolfSign ++ spottedTab (half - 1) ' '
              | otherwise = drawWolf (rows - row + 1)
                where half = columns `div` 2
 
@@ -103,7 +114,7 @@ topLeft :: Char
 topLeft = 'q'
 
 isWolfMovePermitted :: [[String]] -> (Int, Int) -> Char -> Bool
-isWolfMovePermitted tab (x,y) 'q' | isWolfOnLeftEdge tab == True = False
+isWolfMovePermitted tab (x,y) 'q' | isWolfOnLeftEdge tab == True = False {- przecież wystarczy sprawdzić czy y=0 -}
                                   | otherwise = isPoolFree tab (x-1, y - (x `mod` 2))
 isWolfMovePermitted tab (x,y) 'w' | isWolfOnRightEdge tab == True = False
                                   | otherwise = isPoolFree tab (x-1, y + 1 - (x `mod` 2))
@@ -117,7 +128,8 @@ isWolfMovePermitted _ _ _ = False
                             
 
 isPoolFree :: [[String]] -> (Int, Int) -> Bool
-isPoolFree tab (x,y) | (tab !! x) !! y == emptyPool = True
+isPoolFree tab (x,y) | (y < 0 || y > 3 || x < 0 || x > 7) == True = False
+                     | (tab !! x) !! y == emptyPool = True
                      | otherwise = False
 
 isWolfOnLeftEdge :: [[String]] -> Bool                                 
@@ -167,62 +179,112 @@ getNewPosition (x,y) 's' | x `mod` 2 == 0 = (x+1, y+1)
                          | otherwise = (x+1, y)
 getNewPosition _ _ = error "Błędny ruch"
 
+boardWidth = 4
+boardLength = 8
+
+getWolfYCoordinate :: [String] -> Int
+getWolfYCoordinate (x:xs) | x == wolf = boardWidth - length (x:xs)
+		          | otherwise = getWolfYCoordinate xs
+
+findWolfCoordinates :: [[String]] -> (Int, Int)
+findWolfCoordinates (x:xs) | elem wolf x == True = (boardLength - length (x:xs), getWolfYCoordinate x)
+		           | otherwise = findWolfCoordinates xs
+
 doAction :: Char -> [[String]] -> (Int, Int) -> IO ()
-doAction 'k' _ _ = do putStrLn ""
-                      putStrLn "Koniec gry" 
+doAction 'k' _ _ = do putStrLn "\nKoniec gry"
                       return ()
 doAction 'n' _ _ = do putStrLn ""
                       main
-doAction 'z' board (x,y) = do putStrLn "Podaj nazwę pliku, do której ma zostać zapisany stan gry"
+doAction 'z' board (x,y) = do putStrLn "\nPodaj nazwę pliku, do której ma zostać zapisany stan gry"
                               filePath <- getLine
                               do handle <- openFile filePath WriteMode
                                  writeBoardToFile handle board
                                  hClose handle
+				 game board (x,y)
                               
-doAction 'r' _ _ = do putStrLn "Podaj nazwę pliku, z którego ma zostać wczytany stan gry"
-                      filePath <- getLine
-                      do handle <- openFile filePath ReadMode
-                         board <- readBoardFromFile handle
-                         hClose handle
+doAction 'r' board (x,y) = catch 
+                      (do putStrLn "\nPodaj nazwę pliku, z którego ma zostać wczytany stan gry"
+                          filePath <- getLine
+                          do handle <- openFile filePath ReadMode 
+                             content <- hGetContents handle
+			     let parseBoard = parseBoardFromRows (parseBoardRows content)
+				 (a,b) = findWolfCoordinates parseBoard
+			     game parseBoard (a,b)
+                             hClose handle
+                      ) errorHandler
+                      where
+                        errorHandler e = do putStrLn "Nie można wczytać pliku. Nastąpi powrót do bierzącej gry"
+                                            getLine
+                                            game board (x,y)
                       
 doAction  move board position = doMove move board position
 
-figureParser :: Parser Char
-figureParser = do x <- item
+isFigureChar :: Parser Char
+isFigureChar = do x <- item
                   if x /= ',' then return x else failure
 
-readBoardFromFile :: Handle -> IO [[String]]
-readBoardFromFile handle = do content <- hGetContents handle
-                              return [[]]
+parseBoardRows :: String -> [String]
+parseBoardRows "" = [""]
+parseBoardRows s = case parse (many eolParser) s of
+			[(a, [])] -> [a]
+			[(a, b)] -> [a] ++ parseBoardRows (tail b)
+
+parseFigureRows :: String -> [String]
+parseFigureRows "" = [""]
+parseFigureRows s = case parse (many isFigureChar) s of
+			 [(a, [])] -> [a]
+			 [(a, b)] -> [a] ++ parseFigureRows (tail b)
+
+parseBoardFromRows :: [String] -> [[String]]
+parseBoardFromRows [] = []
+parseBoardFromRows (x:xs) = [(parseFigureRows x)] ++ (parseBoardFromRows xs)
+
                               
 
 writeBoardToFile :: Handle -> [[String]] -> IO ()
 writeBoardToFile _ [[]] = return ()
 writeBoardToFile _ [] = return ()
+writeBoardToFile file [a] = hPutStr file (getStringFromList a)
 writeBoardToFile file (x:xs) = do hPutStrLn file (getStringFromList x)
                                   writeBoardToFile file xs
 
 getStringFromList :: [String] -> String
 getStringFromList [] = ""
-getStringFromList (x:xs) = x ++ getStringFromList xs
+getStringFromList [a] = a
+getStringFromList (x:xs) = x ++ "," ++ getStringFromList xs
+
+-- narazie nigdzie nie używana
+isWolfOnRow :: [String] -> Bool
+isWolfOnRow [[]] = False
+isWolfOnRow [] = False
+isWolfOnRow (x:xs) | x == wolf = True
+                   | otherwise = isWolfOnRow xs
+
+
+isEndOfGame :: [[String]] -> (Int, Int) -> Bool
+isEndOfGame _ (0,_) = True
+isEndOfGame tab (7,y) = (not (isPoolFree tab (6, y))) && (not (isPoolFree tab (6,y-1)))
+isEndOfGame tab (x,y) | x `mod` 2 == 0 = (not (isPoolFree tab (x-1,y))) && (not (isPoolFree tab (x-1,y+1))) && (not (isPoolFree tab (x+1,y))) && (not (isPoolFree tab (x+1,y+1)))
+                      | otherwise = (not (isPoolFree tab (x-1,y))) && (not (isPoolFree tab (x-1,y-1))) && (not (isPoolFree tab (x+1,y))) && (not (isPoolFree tab (x+1,y-1)))
 
 doMove :: Char -> [[String]] -> (Int, Int) -> IO ()
 doMove move board (x,y) = if (isWolfMovePermitted (board) (x, y) move) then game (moveWolf board (x,y) (getNewPosition (x,y) move)) (getNewPosition (x,y) move)  
-                          else do putStrLn "ruch niedozwolony"
+                          else do putStrLn "\nRuch niedozwolony!"
                                   game board (x,y)
 
 game :: [[String]] -> (Int, Int) -> IO ()
-game board (x,y) = do putStrLn ""
+game board (x,y) = do putStrLn ("dlugosc board: " ++ show (length board) ++ " koniec")
                       drawCheckboard' board
-                      putStrLn "wykonaj ruch"
+		      drawOptions
 --                      move <- getChar
                       action <- getChar
-                      doAction action board (x,y)
---                      if (isWolfMovePermitted (board) (x, y) move) then game (moveWolf board (x,y) (getNewPosition (x,y) move)) (getNewPosition (x,y) move)  
---                                                                       else do putStrLn "ruch niedozwolony"
---                                                                               game board (x,y)
-
+                      if (elem action wolfMoves) then
+                         if (isWolfMovePermitted (board) (x, y) action) then game (moveWolf board (x,y) (getNewPosition (x,y) action)) (getNewPosition (x,y) action)  
+                                                                       else do putStrLn "\nRuch niedozwolony!"
+                                                                               game board (x,y)
+                      else
+                         doAction action board (x,y)        
 --grę rozpoczyna grający wilkiem
-main = do putStrLn "wybierz pozycję początkową wilka w dolnym rzędzie podając liczbę od 0 do 3"
+main = do putStrLn "\nwybierz pozycję początkową wilka w dolnym rzędzie podając liczbę od 0 do 3"
           y <- getStartPosition
           game (initCheckboard y) (7,y)

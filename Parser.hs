@@ -24,6 +24,16 @@ p +++ q = P (\inp -> case parse p inp of
                        [] -> parse q inp
                        [(v, out)] -> [(v, out)])
 
+sat :: (Char -> Bool) -> Parser Char
+sat p = do x <-item
+	   if p x then return x else failure
+
+char :: Char -> Parser Char
+char x = sat (==x)
+
+eolParser :: Parser Char
+eolParser = sat (/='\n')
+
 many :: Parser a -> Parser [a]
 many p = many1 p +++ return []
 
