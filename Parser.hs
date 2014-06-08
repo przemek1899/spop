@@ -42,4 +42,24 @@ many1 p = do v <- p
              vs <- many p
              return (v:vs)
 
+isFigureChar :: Parser Char
+isFigureChar = do x <- item
+                  if x /= ',' then return x else failure
+
+parseBoardRows :: String -> [String]
+parseBoardRows "" = [""]
+parseBoardRows s = case parse (many eolParser) s of
+			[(a, [])] -> [a]
+			[(a, b)] -> [a] ++ parseBoardRows (tail b)
+
+parseFigureRows :: String -> [String]
+parseFigureRows "" = [""]
+parseFigureRows s = case parse (many isFigureChar) s of
+			 [(a, [])] -> [a]
+			 [(a, b)] -> [a] ++ parseFigureRows (tail b)
+
+parseBoardFromRows :: [String] -> [[String]]
+parseBoardFromRows [] = []
+parseBoardFromRows (x:xs) = [(parseFigureRows x)] ++ (parseBoardFromRows xs)
+
 
