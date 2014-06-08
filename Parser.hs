@@ -31,6 +31,7 @@ sat p = do x <-item
 char :: Char -> Parser Char
 char x = sat (==x)
 
+--end of line parser
 eolParser :: Parser Char
 eolParser = sat (/='\n')
 
@@ -42,24 +43,26 @@ many1 p = do v <- p
              vs <- many p
              return (v:vs)
 
-isFigureChar :: Parser Char
-isFigureChar = do x <- item
-                  if x /= ',' then return x else failure
+figureCharParser :: Parser Char
+figureCharParser = do x <- item
+                      if x /= ',' then return x else failure
 
+--parsuje każdą linię z pliku
 parseBoardRows :: String -> [String]
 parseBoardRows "" = [""]
 parseBoardRows s = case parse (many eolParser) s of
 			[(a, [])] -> [a]
 			[(a, b)] -> [a] ++ parseBoardRows (tail b)
 
+--parsuje z każdej linii danych figury (wilka, owce i puste pola)
 parseFigureRows :: String -> [String]
 parseFigureRows "" = [""]
-parseFigureRows s = case parse (many isFigureChar) s of
+parseFigureRows s = case parse (many figureCharParser) s of
 			 [(a, [])] -> [a]
 			 [(a, b)] -> [a] ++ parseFigureRows (tail b)
 
+
+--konstruuje planszę z sparsowanych danych z pliku
 parseBoardFromRows :: [String] -> [[String]]
 parseBoardFromRows [] = []
 parseBoardFromRows (x:xs) = [(parseFigureRows x)] ++ (parseBoardFromRows xs)
-
-
